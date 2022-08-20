@@ -1,0 +1,505 @@
+---
+title: "Superstore Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: ["twitter", "facebook", "menu"]
+    theme: readable
+---
+
+
+```{r setup, include=FALSE, warning=TRUE, message=FALSE}
+# R packages indstalled 
+
+library(flexdashboard)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(fpp2)
+library(knitr)
+library(DT)
+library(rpivotTable)
+library(plotly)
+library(openintro)
+library(highcharter)
+
+
+# Data import
+ss <- read.csv("superstore2.csv", header = T)
+
+# Data manipulation
+ss <- ss %>% 
+  mutate(Order.Date = ymd(Order.Date),
+         Ship.Date = ymd(Ship.Date),
+         Year = factor(Year),
+         Month = factor(Month),
+         Ship.Mode = factor(Ship.Mode),
+         Customer.Name =! factor(Customer.Name),
+         Segment = factor(Segment),
+         Country = factor(Country),
+         City = factor(City),
+         State = factor(State),
+         Region = factor(Region),
+         Category = factor(Category),
+         Sub.Category = factor(Sub.Category),
+         Product.Name = factor(Product.Name)
+         ) %>%    # These are datas and factor conversion          
+  select(-X, -Ship.Date, -Product.ID, -Postal.Code, -Country, -Region, -Year, -Month, -date.var) %>%    # Removing some unnecessary variables to simplify the df
+  select(State, City, Order.Date, Ship.Mode, Customer.Name, Segment, Category, Sub.Category, Product.Name, Sales) # Rearranging all variables
+ 
+# Preparing some additional tables  
+# Furniture df
+furni <- ss %>% filter(Category == "Furniture")
+
+# Office suppliesdf
+office <- ss %>% filter(Category == "Office Supplies")
+
+# Technology df
+tech <- ss %>% filter(Category == "Technology")
+
+```
+
+
+Executive Summary {data-icon="fa-users"}
+=====================================================================================
+
+R1
+----------------------------------------------------------
+
+### Last Update
+
+```{r}
+valueBox(Sys.time(),
+         icon = "glyphicon-time", color = "lightgrey")
+```
+
+
+
+### Total Sales
+
+```{r}
+valueBox(paste0("$", prettyNum(sum(ss$Sales), big.mark = ",")),
+         icon = "fa-dollar-sign")
+ 
+
+```
+
+### Total Orders
+
+```{r}
+valueBox(paste0(prettyNum(nrow(ss), ",")),
+         icon = "fa-file-invoice")
+
+
+```
+
+### Average Sales per Order
+
+```{r}
+a <- ss %>% 
+  summarise(count = n(),
+                 total.sales = sum(Sales)) 
+
+ave.sales <- round(a$total.sales/a$count)
+
+valueBox(paste0("$", ave.sales), 
+         icon = "fab fa-circle-dollar")
+
+```
+
+
+
+R1
+----------------------
+
+### Product Type
+
+```{r, message=FALSE, warning=FALSE}
+
+library(networkD3)
+
+networkData <- ss %>% 
+  select(Category, Sub.Category) %>% 
+  group_by(Category, Sub.Category) %>% 
+  summarise(count = n()) 
+
+simpleNetwork(networkData, zoom = T, 
+              linkDistance = 80,
+              fontSize = 15,
+              opacity = 0.8,
+              width = 500
+              )
+
+```
+
+### Product Sales
+
+```{r, warning=FALSE, message=FALSE}
+# set df
+bubble.data <- ss %>% 
+  select(Category, Sub.Category, Sales) %>% 
+  group_by(Category, Sub.Category) %>% 
+  summarise(total.sales = round(sum(Sales)),
+            total.sales2 = prettyNum(total.sales, big.mark = ","))
+
+# chart
+hc <- hchart(object = bubble.data, "packedbubble",
+       hcaes(name = "Sub.Category", value = "total.sales", group = "Category"))
+
+q60 <- as.numeric(quantile(bubble.data$total.sales, .60))   # Only catgeory >0.95 will be appear
+
+hc %>% 
+  hc_tooltip(
+    useHTML = TRUE,
+    pointFormat = "<b>{point.name}:</b> {point.value}"
+  ) %>% 
+  hc_plotOptions(
+    packedbubble = list(
+      maxSize = "50%",
+      zMin = 0,
+      layoutAlgorithm = list(
+        gravitationalConstant =  0.05,
+        splitSeries =  TRUE, # TRUE to group points
+        seriesInteraction = TRUE,
+        dragBetweenSeries = TRUE,
+        parentNodeLimit = TRUE
+      ),
+      dataLabels = list(
+        enabled = TRUE,
+        format = "{point.name}",
+        filter = list(
+          property = "y",
+          operator = ">",
+          value = q60
+        ),
+        style = list(
+          color = "black",
+          textOutline = "none",
+          fontWeight = "normal"
+        )
+      )
+    )
+  )
+```
+
+
+R1  
+-----------------------------
+
+### Best Sellers
+
+```{r}
+library(collapsibleTree)
+
+tree.data <- ss %>% 
+  group_by(Segment, Category, Sub.Category) %>% 
+  summarise(total.Sales = round(sum(Sales)))
+
+collapsibleTreeSummary(tree.data,
+                root = "Superstore",  
+                hierarchy = c("Segment", "Category", "Sub.Category"),  
+                width = 800, 
+                height = 1000,
+                attribute = "total.Sales",
+                zoomable = T,
+                collapsed = F, 
+                fontSize = 15, 
+                nodeSize = "total.Sales")  
+
+
+```
+
+
+Furniture {data-navmenu="Menu A"}
+===============================
+
+R2 
+-------------------
+
+### Sales Analysis (2015 - 2018)
+
+```{r}
+valueBox(paste("Furniture"),
+         color = "orange")
+
+```
+
+### Total Sales 
+
+```{r}
+valueBox(paste0("$", prettyNum(sum(furni$Sales), big.mark = ",")),
+         icon = "fa-money")
+
+```
+
+### Proportion of Grand Total Sales 
+
+```{r}
+
+gauge(value = sum(furni$Sales),  
+      min = 0,  
+      max = sum(ss$Sales))  
+
+```
+
+
+
+### 2015 Total Sales 
+
+```{r}
+valueBox(paste0("$", prettyNum(156478, big.mark = ",")),
+         icon = "fa-money",
+         color = "grey")
+
+```
+
+### 2016 Total Sales 
+
+```{r}
+valueBox(paste0("$", prettyNum(164054	, big.mark = ",")),
+         icon = "fa-money",
+         color = "grey")
+
+```
+
+### 2017 Total Sales 
+
+```{r}
+valueBox(paste0("$", prettyNum(195813, big.mark = ",")),
+         icon = "fa-money",
+         color = "grey")
+
+```
+
+### 2018 Total Sales 
+
+```{r}
+valueBox(paste0("$", prettyNum(212313, big.mark = ",")),
+         icon = "fa-money",
+         color = "grey")
+
+```
+
+R2 {data-height = 350}
+----------------------------------------
+
+### Daily Sales
+
+```{r}
+g1 <- ggplot(furni, aes(x = Order.Date, y = Sales)) + geom_point() + geom_line() +
+  labs(x = "Date", y = "Sales, $") + theme_minimal()
+
+ggplotly(g1)
+
+```
+
+### Daily Sales (Log)
+
+```{r}
+g2 <- ggplot(furni, aes(x = Order.Date, y = log(Sales))) + geom_point() + geom_line() +
+  labs(x = "Date", y = "Sales, $") + theme_minimal()
+
+ggplotly(g2)
+
+```
+
+### Monthly Sales
+
+```{r}
+# Set up df
+
+furni2 <- furni %>% 
+  mutate(Date = paste0(year(Order.Date), "-", month(Order.Date)),
+         Date = ym(Date)) %>% 
+  group_by(Date) %>% 
+  summarise(montly.sales = sum(Sales))
+
+furni.ts <- ts(furni2$montly.sales, start = c(2015,1), frequency = 12)
+
+# qplot
+
+g3 <- autoplot(furni.ts) + 
+  labs(y = "Sales, $") +
+  geom_point() +
+  geom_vline(aes(xintercept = 2016), color = "purple", linetype = 2) +
+  geom_vline(aes(xintercept = 2017), color = "purple", linetype = 2) +
+  geom_vline(aes(xintercept = 2018), color = "purple", linetype = 2) +
+  geom_vline(aes(xintercept = 2019), color = "purple", linetype = 2) +
+  geom_vline(aes(xintercept = 2015), color = "purple", linetype = 2) +
+  theme_classic()
+
+ggplotly(g3)
+
+```
+
+
+R2 {data-height = 650}
+----------------
+
+### Difference Plot
+
+```{r}
+furni.ts <- ts(furni2$montly.sales, start = c(2015,1), frequency = 12)
+furni.ts.d <- diff(furni.ts)
+
+g4 <- autoplot(furni.ts.d) + geom_point(color = "orange3") + geom_line(color = "orange") + theme_classic() +
+  labs(y = "Sales, $") 
+
+ggplotly(g4)
+
+```
+
+### Seasonal Plot
+
+```{r}
+g5 <- ggseasonplot(furni.ts.d) + geom_point() + theme_classic() + labs(y = "Sales, $") 
+ggplotly(g5)
+```
+
+### Subseries Plot
+
+```{r}
+g6 <- ggsubseriesplot(furni.ts.d) + geom_point(color = "orange2") + geom_line(color = "orange2") +
+  theme_classic() + labs(y = "Sales, $") 
+ggplotly(g6)
+
+```
+
+
+Furniture Forecast {data-orientation=columns}{data-navmenu="Menu A"}
+==========================================================================
+
+
+### ETS Forecast of Next 24 Months
+
+```{r}
+library(highcharter)
+
+furni_ets <- ets(furni.ts)
+furni_ets_fc <- forecast(furni_ets, h = 24, level = 95)
+
+hchart(furni_ets_fc)
+
+
+```
+
+### Model Summary
+
+```{r}
+summary(furni_ets_fc)
+
+```
+
+
+### Model Diagnostic 
+
+```{r}
+checkresiduals(furni_ets_fc)
+
+
+```
+
+
+Map
+=======================================
+
+R3
+-------------------------
+
+### Overall Sales
+
+```{r}
+overall <- ss %>% group_by(State) %>% summarise(total.sales = sum(Sales))
+  
+highchart() %>% 
+  hc_add_series_map(usgeojson, overall,
+                    name = "State",
+                    value = "total.sales",
+                    joinBy = c("woename", "State")) %>%
+  hc_mapNavigation(enabled = T) %>% 
+  hc_colorAxis(minColor = "white", maxColor = "Black")
+
+
+```
+R3
+-------------------------
+
+### Furniture sales
+
+```{r}
+f <- furni %>% group_by(State) %>% summarise(total.sales = sum(Sales))
+
+highchart() %>% 
+  hc_add_series_map(usgeojson, f,
+                    name = "State",
+                    value = "total.sales",
+                    joinBy = c("woename", "State")) %>%   # woe = where on earth
+  hc_mapNavigation(enabled = T) 
+  
+```
+### Office Supplies sales 
+
+```{r}
+
+o <- office %>% group_by(State) %>% summarise(total.sales = sum(Sales))
+
+highchart() %>% 
+  hc_add_series_map(usgeojson, o,
+                    name = "State",
+                    value = "total.sales",
+                    joinBy = c("woename", "State")) %>%   # woe = where on earth
+  hc_mapNavigation(enabled = T) %>% 
+  hc_colorAxis(minColor = "yellow", maxColor = "green")
+  
+```
+
+### Technology sales 
+
+```{r}
+t <- office %>% group_by(State) %>% summarise(total.sales = sum(Sales))
+
+highchart() %>% 
+  hc_add_series_map(usgeojson, t,
+                    name = "State",
+                    value = "total.sales",
+                    joinBy = c("woename", "State")) %>%   # woe = where on earth
+  hc_mapNavigation(enabled = T) %>% 
+  hc_colorAxis(minColor = "orange", maxColor = "brown")
+  
+```
+
+Raw Data
+===============================
+
+
+```{r}
+datatable(ss,
+          caption = "Raw Sales Data",
+          rownames = T,
+          filter = "top",
+          option = list(pageLength = 25))
+
+```
+
+Pivot Table
+=================================================================================
+
+```{r}
+# Data frame
+
+furni2 <- furni %>% 
+  mutate(Date = paste0(year(Order.Date), "-", month(Order.Date)),
+         Date = ym(Date)) %>% 
+  group_by(Date,Ship.Mode, Segment, State, Category, Sub.Category) %>% 
+  summarise(montly.sales = sum(Sales))
+
+# Interactive Pivot table 
+
+rpivotTable(furni2,
+            rendererName = "Heatmap",
+            cols = "Order.Date",
+            rows = "State")
+```
+
+

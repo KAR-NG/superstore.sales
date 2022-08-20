@@ -1,0 +1,88 @@
+---
+title: "bike_rent"
+author: "Kar"
+date: "2022-08-14"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(prophet)
+
+```
+
+
+## 8 Bike Rental Forecast with Regressors
+
+<https://www.youtube.com/watch?v=sA0OqK6Mwc4&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS&index=8>
+
+I will use Bike rental data available from Kaggle. We will start by simple time-series model that capture trends and seasonality.
+
+Then we will add aggressors such as US holidays because Bike rental is usually affected by that, and also temperature and humidity.
+
+The data is called "Bike Sharing in Washington D.C. Dataset" in Kaggle. Link: <https://www.kaggle.com/datasets/marklvl/bike-sharing-dataset>
+
+Forecasting of rental bike is very useful for planning purposes.
+
+### 8.1 Data & plot
+
+```{r}
+bike <- read.csv("bike.csv", header = T)
+
+bike
+```
+
+We will use date column and "cnt". cnt is the number of bike rented.
+
+```{r}
+bike <- bike %>% mutate(dteday = ymd(dteday))
+
+```
+
+Following plot shows that:
+
+-   We have complete two years of data.\
+-   The data has seasonality and trend.
+    -   During winters, bike rental is low
+    -   During summers, bike rental is higher significantly
+
+```{r}
+
+qplot(x = dteday, y = cnt, data = bike) + 
+  labs(title = "Bike Rentals in Washington DC")
+
+```
+
+First we develop forecast based on date and bike-rental, then we add information of holidays in US because bike-rental might be affected. Later on, we add regressors such as temperature and humidity and see whether it will improve our bike rental forecasting model.
+
+### 8.2 Model and Its performance
+
+```{r}
+ds <- bike$dteday
+y <- bike$cnt
+
+df.bike <- data.frame(ds, y)
+
+# Prophet model
+
+m.bike <- prophet(df = df.bike)
+
+# forecast
+
+future <- make_future_dataframe(m.bike, periods = 365)  # predict next 365 days
+fc <- predict(m.bike, future)
+  
+```
+
+Plot forecast
+
+```{r}
+plot(m.bike, fc)
+```
+```{r}
+dyplot.prophet(m.bike, fc)
+
+```
+It looks like a decent model because most of the data point fall within the confidence interval, and the model seems to capture the trends and seasonality nicely. 

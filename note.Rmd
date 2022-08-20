@@ -1,0 +1,1030 @@
+---
+title: "Note.DrRai"
+author: "Kar"
+date: "2022-08-13"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+```
+
+## 1. Decomposition
+
+<https://www.youtube.com/watch?v=OJ3aeVBHAIk&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS>
+
+```{r}
+data("AirPassengers")
+
+ap <- AirPassengers
+str(ap)
+
+```
+
+It is a time-series date from 1949 to 1961.
+
+```{r}
+head(ap)
+
+```
+
+In Jan, there are 112 passengers.\
+In Feb, it increases slighly to 118.
+
+```{r}
+ts(ap, frequency = 12, start = c(1949, 1))
+
+```
+
+It is a typical time-series data.
+
+```{r}
+plot(ap)
+
+```
+
+-   There is an increasing trend, it is not stationary.\
+-   There is some amount of seasonality in each year
+-   The initial span is increase - multiplicative (exponential increase). This makes this time-series non-stationary so we can do a log transformation to make sure that this span from year to year are not fluctuating too much from each other.
+
+```{r}
+ap.log <- log(ap)
+
+plot(ap.log)
+
+```
+
+**Decomposition**
+
+Now we can do decomposition of this additive time-series using decompose function.
+
+Decompose a time-series into seasonal, trend, and irregular components using moving average. "Decompose" deals with additive or multiplicative seasonal component.
+
+```{r}
+decomp <- decompose(ap.log) 
+```
+
+Get number for each month.
+
+```{r}
+decomp$figure
+```
+
+```{r}
+plot(decomp$figure,
+     type = "b",
+     xlab = "Month",
+     ylab = "Seasonality Index",
+     col = "blue",
+     las = 2)
+```
+
+-   In month 6, 7, 8, 9, values are quite high.\
+-   Compared to average travel, month 6 and 7 have 20% more volume. Our travel data is in a log scale, so this interpretation is in %.\
+-   In November, it sees 20% on the lower side.\
+-   Y = 0 is the average, month 3, 4, 5 are near the average.
+
+```{r}
+decomp.df <- as.tibble(decomp$figure) %>% mutate(month = c(1:12)) %>% rename("Seasonal.Index" = "value")
+
+ggplot(decomp.df, aes(x = month, y = Seasonal.Index)) +
+  geom_point() +
+  geom_path() +
+  geom_hline(yintercept = 0, linetype = 2, color = "grey2")
+
+```
+
+This plot additive time series. The top graph is original but remember the value has been log-transformed.
+
+```{r}
+plot(decomp)
+
+```
+
+Now we can see that this time series is broken down in to trend, seasonal, and random component.
+
+(If use original data instead of the log one)
+
+```{r}
+decomp.2 <- decompose(ap)
+
+plot(decomp.2$figure,
+     type = "b",
+     xlab = "Month",
+     ylab = "Seasonality Index",
+     col = "blue",
+     las = 2)
+```
+
+```{r}
+plot(decomp.2)
+```
+
+## 2 ARIMA - Autoregressive Integrated Moving Average
+
+```{r}
+library(forecast)
+
+```
+
+auto.arima() will give us the best model based on AIC or BIC value.
+
+```{r}
+model <- auto.arima(ap.log)
+model
+
+```
+
+ARIMA(0, 1, 1) = (p, d, q) = (AR Order, degree of differencing, Moving Average order)
+
+```{r}
+attributes(model)
+```
+
+If we want coefficient from the model.
+
+```{r}
+model$coef
+```
+
+If using original ap instead of ap-log.
+
+```{r}
+model2 <- auto.arima(ap)
+
+```
+
+**ACF & PACF Plots**
+
+```{r}
+checkresiduals(model)
+```
+
+Following graph shows us that the autocorrelation for in-sample forecast errors do not exceed these 95% confidence interval for lag 1 till the ending lag. The first 1 is at 0.
+
+```{r}
+acf(model$residuals, main = "Correlogram")
+
+```
+
+Partial ACF: In this case, all lag have values within the significant interval (blue dotted line).
+
+```{r, fig.align = "center", fig.height = 8, fig.width = 8, out.width = "8.5in"}
+
+pacf(model$residuals, main = 'Partial Correlogram')
+
+```
+
+**Ljung-Box Test**
+
+We can conclude that there is little evidence of non-zero autocorrelation in the in-sample forecast erros at lag 1 to 20.
+
+```{r}
+
+Box.test(model$residuals, 
+         lag = 20,       # 20 is more than enough
+         type = "Ljung-Box" )
+
+```
+
+Plot again: So, at the one near 1.5 that is so close to the boundary, this is just random chance that so close to the line. Therefore, in reality, there is little evidence of non-zero auto-correlation.
+
+```{r}
+acf(model$residuals, main = "Correlogram")
+
+```
+
+**Residual Plot**
+
+Use residual plot just to confirm that there is no problem with this model.
+
+-   We are looking for a histogram that is more of less normal in shape.
+
+```{r}
+hist(model$residuals, 
+     col = "red",
+     xlab = "Error",
+     main = "Histogram of Residuals",
+     freq = FALSE)
+lines(density(model$residuals))
+
+```
+
+**Forecast**
+
+```{r}
+f <- forecast(model, h = 48)
+
+autoplot(f)
+
+```
+
+```{r}
+accuracy(f)
+
+```
+
+These are accuracy measures used in time-series.
+
+**Original data**
+
+```{r}
+
+model.real <- auto.arima(ap)
+checkresiduals(model.real)
+
+```
+
+```{r}
+Box.test(model.real$residuals, 
+         lag = 20, 
+         type = "Ljung-Box")
+
+```
+
+```{r}
+fc2 <- forecast(model.real, h = 48)
+autoplot(fc2)
+```
+
+## 3. Time-series Clustering
+
+<https://www.youtube.com/watch?v=QrTmwqK6edc&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS&index=3>
+
+Data: <http://kdd.ics.uci.edu/databases/synthetic_control/synthetic_control.html>
+
+```{r}
+data <- read.table(file.choose(),
+                   header = F,      # There is no header in the text file
+                   sep = "")        # numbers are seperated by spaces
+data
+
+```
+
+-   because there is no title, so we have V1 to V60.\
+-   There are 600 rows for each column.
+
+Plotting the 60th columns
+
+```{r}
+head(data[, 60], 20)
+
+```
+
+```{r}
+plot(data[, 60], type = "line")
+
+```
+
+I can see there are 6 different patterns in the dataset and is not being labelled in the dataset.
+
+So you see 6 different patterns in the V60 variable.
+
+```{r}
+j <- c(5, 105, 205, 305, 405, 505)
+
+# Getting 6 values from each variables
+data.j <- data[j, ]
+data.j
+
+```
+
+```{r}
+sample <- t(data.j)
+head(sample, 10)
+```
+
+There are 6 different plots:
+
+```{r}
+plot.ts(sample,
+        main = "Time-series Plot", 
+        col = "blue",
+        type = "b")
+
+```
+
+### 3.1 Data preparation
+
+Need to prepare the data before clustering.
+
+```{r}
+set.seed(123)
+
+n <- 10
+s <- sample(1:100, n)   # 10 random number from 100
+
+# We use systematic sampling, we keep on adding 100 to all the 6 patterns. 
+
+i <- c(s, 100+s, 200+s, 300+s, 400+s, 500+s)
+
+```
+
+Now each pattern I have only 60 observations. 10 data for each of the 6 patterns.
+
+```{r}
+d <- data[i, ]
+
+```
+
+```{r}
+pattern <- c(rep("Normal", n),
+             rep("Cyclic", n),
+             rep("Increasing Trend", n),
+             rep("Decreasing Trend", n),
+             rep("Upward shift", n),
+             rep("Downward shift", n))
+
+```
+
+###3.2 Calculate distances
+
+Dynamic Time Warping:
+
+```{r}
+library(dtw)
+```
+
+```{r}
+distance <- dist(d, 
+                 method = "DTW")  # Use DTW for calculating the distances
+
+```
+
+### 3.3 Hierarchical Clustering
+
+```{r, fig.width=12}
+
+hc <- hclust(distance, method = "average")
+
+plot(hc, labels = pattern, 
+     cex = 0.8,
+     hang = -1,
+     col = "blue")  
+rect.hclust(hc, k = 4)  # if we know how many cluster we want
+```
+
+## 4 Time Series Classification
+
+### 4.1 Data manipulation
+
+I think V1 is time1, V2 is time2 ... and etc.
+
+```{r}
+pattern100 <- c(rep("Normal", 100),
+             rep("Cyclic", 100),
+             rep("Increasing Trend", 100),
+             rep("Decreasing Trend", 100),
+             rep("Upward shift", 100),
+             rep("Downward shift", 100))
+
+newdata <- data.frame(data, pattern100) %>% 
+  relocate(pattern100, .before = V1) %>% 
+  mutate(pattern100 = as.factor(pattern100))
+
+
+head(newdata, 10)
+
+```
+
+### 3.2 Decision tree Classification
+
+```{r}
+library(party)   # partitioning
+
+tree <- ctree(pattern100~., # Classification for pattern100 and all 60 variables  
+              newdata)
+
+```
+
+Look at the tree:
+
+-   There are 25 terminal nodes
+
+```{r}
+tree
+
+```
+
+### 4.3 Classification performance
+
+**Confusion matrix**:
+
+```{r}
+tab <- table(predict(tree, newdata), newdata$pattern100)
+tab
+
+```
+
+-   Diagonal is correctly predicted classification.
+
+**Overall Accuracy**
+
+WA! LOL! Accuracy is 95%
+
+```{r}
+sum(diag(tab))/sum(tab)
+
+```
+
+## 5 Daily Forecast: 5 Facebook package, Wiki data
+
+<https://www.youtube.com/watch?v=7xDAYa6Ouo8&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS&index=5>
+
+### 5.1 Wiki data
+
+**Getting Wikipedia trend data**
+
+```{r}
+library(wikipediatrend)
+
+tom.data <- wp_trend(page = "Tom_Brady",
+                     from = "2013-01-01",
+                     to = "2015-12-31")        
+
+# Very old trend may not be available. No data available prior to December 2007. 
+
+
+```
+
+We will only use the date and views.
+
+```{r}
+qplot(date, views, data = tom.data)
+```
+
+-   Seasonality associated with a football game is not really clear.
+-   If we convert y-axis into a log scale to help to see clearer.
+
+```{r}
+qplot(date, log(views), data = tom.data)
+```
+
+### 5.2 Manage Missing Value
+
+```{r}
+summary(tom.data)
+```
+
+There are 0 views, this mean missing data, we have to take care of such data point.
+
+There are 147 data with 0 values.
+
+```{r}
+# Missing data
+
+tom.data2 <- tom.data %>% 
+  mutate(views = na_if(views, 0))    # use na_if
+  
+tom.data2
+
+```
+
+```{r}
+tom.data2 <- tom.data2 %>% 
+  dplyr::select(date, views) %>% 
+  mutate(views.log = log(views)) %>% 
+  select(-views) %>% 
+  na.omit() %>% 
+  arrange(date)
+
+```
+
+```{r}
+qplot(x = date, y = views.log, data = tom.data2)
+
+```
+
+### 5.3 Facebook data
+
+```{r}
+library(prophet)   # developed by core data science team
+
+```
+
+-   This prophet package make use of additive model\
+-   non linear trends are filled with yearly and weekly seasonality\
+-   it also have options to include holidays.
+
+```{r}
+tom.data
+```
+
+ALERT: In Prophet package, the variable name HAVE TO BE "ds" and "y" otherwise it will be an error.
+
+```{r}
+# prophet(tom.data2)  # The variable name was "date" and "views.log" instead of "ds" and "y"...
+
+```
+
+```{r}
+tom.data2 <-  tom.data2 %>% 
+  rename("ds" = "date",
+         "y" = "views.log")
+
+m <- prophet(tom.data2)
+
+```
+
+### 5.4 Forecast
+
+```{r}
+# Lets make a future dataset of future 365
+future <- make_future_dataframe(m, periods = 365)
+
+tail(future)
+
+```
+
+```{r}
+fc <- predict(m, future)
+tail(fc[c("ds", 
+          "yhat", # predicted value
+          "yhat_lower", 
+          "yhat_upper")])
+
+```
+
+Prediction of the last date (the value is log, because ts dataset has been logged during data transformation): Therefore the
+
+```{r}
+exp(8.122911)
+
+```
+
+Showing the forecast:
+
+```{r}
+
+plot(m, fc)
+
+```
+
+```{r}
+prophet_plot_components(m, fc)
+```
+
+```{r}
+??prophat
+```
+
+## 6 Daily Forecast - Cryptocurrency Etherium Prices with R
+
+<https://www.youtube.com/watch?v=rV-hhKBRKbI&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS&index=6>
+
+Predict the price of Etherium cytoccurency.
+
+```{r}
+
+ethe <- read.csv("Ethereum.csv", header = T)
+
+```
+
+```{r}
+head(ethe)
+```
+
+```{r}
+ethe <- ethe %>% 
+  mutate(Date = dmy(Date))
+
+ethe
+```
+
+```{r}
+qplot(x = Date, y = Close, data = ethe,
+      main = "Ethereum closing prices 2015 - 2019")
+
+```
+
+-   It had a lot of time with low value
+-   then it touch \$1400 at 2018.
+
+#### 6.1 Log Transformation
+
+In order to see when the value is quite low or when the value is quite high - seasonality, we log the data so that we can see seasonality clearer.
+
+```{r}
+ds <- ethe$Date
+y <- log(ethe$Close)
+
+df <- data.frame(ds, y)
+
+```
+
+Earlier we were not able to see clear pattern, because some values are too low and some are too high.
+
+```{r}
+qplot(x = ds, y = y, 
+      main = "Etherium closing prices in log scale")
+```
+
+```{r}
+df
+```
+
+#### 6.2 Forecast
+
+```{r}
+m <- prophet(df, daily.seasonality=TRUE)
+str(m)
+```
+
+Making forecast for next 365 days
+
+```{r}
+future <- make_future_dataframe(m, period = 365)   # prediction for 365 days
+
+fc <- predict(m, future)   # use m to predict future
+
+```
+
+```{r}
+plot(m, fc) + labs(title = "Forecast") + theme_bw()
+
+```
+
+```{r}
+# interactive plot
+
+dyplot.prophet(m, fc)
+
+```
+
+```{r, fig.height=5, fig.width=6}
+prophet_plot_components(m, fc)
+```
+
+-   On Monday, the closing prices is usually low, friday is usually high.
+-   During summer month, closing prices are on the highest side, winter, the closing prices tends to be lower.
+
+```{r}
+df2 <- data.frame(
+  ds = ethe$Date,
+  y = ethe$Close
+)
+
+plot(df2)
+
+```
+
+```{r}
+m2 <- prophet(df2, daily.seasonality=TRUE)
+future2 <- make_future_dataframe(m2, periods = 365)
+fc2 <- predict(m2, future2)
+
+plot(m2, fc2)
+
+```
+
+```{r}
+dyplot.prophet(m2, fc2)
+```
+
+```{r, fig.height=5, fig.width=6}
+prophet_plot_components(m2, fc2)
+
+```
+
+#### 6.3 Model Performance
+
+Use the predicted vs actual of non-future-forecasted dates.
+
+The original data has 1544 rows of data
+
+```{r}
+dim(df)
+```
+
+The forecast df has 1909 row of data.
+
+```{r}
+dim(fc)
+
+```
+
+Therefore model performance will be compare 1544 rows of actual data with 1544 rows of predicted data.
+
+```{r}
+pred <- fc$yhat[1:1544]
+actual <- df$y
+plot(pred, actual, main = "Strange trend, because pred starts from earlies date, \n actual starts from latest date - Wrong Comparison") 
+
+```
+
+Therefore, use m$history$y it is the same data but with correct sequence of date.
+
+```{r}
+pred <- fc$yhat[1:1544]
+actual <- m$history$y
+
+plot(pred, actual)
+abline(lm(pred~actual), col = "blue")
+
+```
+
+```{r}
+summary(lm(pred~actual))
+
+```
+
+R2 indicates that this model explains 99.16% of variability.
+
+**Other performance metrics**
+
+```{r}
+x <- cross_validation(m, 365, units = 'days')   # 365 days
+
+
+```
+
+```{r}
+performance_metrics(x, rolling_window = 0.1)   # 10% of data to be used
+
+```
+
+```{r}
+plot_cross_validation_metric(x, metric = 'rmse', rolling_window = 0.1)
+```
+
+These are the actual data points for RMSE, and the *first value* of the blue line is based on the rolling window.
+
+If you use rollinwg_window = 0.2, the point starts at later point.
+
+## 7 Covid19 Forecast
+
+```{r}
+library(covid19.analytics)
+library(tidyverse)
+library(prophet)
+library(lubridate)
+
+```
+
+```{r}
+# Data
+
+tsc <- covid19.data(case = "ts-confirmed")
+
+```
+
+```{r}
+tsc
+```
+
+Use only US.
+
+```{r}
+tsc <- tsc %>% filter(Country.Region == "US")
+tsc
+```
+
+Transpose the data:
+
+```{r}
+tsc <- data.frame(t(tsc))
+tsc
+```
+
+But now the date is used as row name. We want a column of date.
+
+```{r}
+tsc <- tsc %>% 
+  rownames_to_column() %>% 
+  rename("date" = "rowname",
+         "confirmed" = "t.tsc.") 
+
+tsc <- tsc[-c(1:4), ] 
+
+tsc <- tsc %>% 
+  mutate(date = ymd(date),
+         confirmed = as.numeric(confirmed)) 
+
+head(tsc, 10)
+```
+
+```{r}
+qplot(x = date, y = confirmed, data = tsc,
+      main = "Covid19 Confirmed Cases in US")
+
+```
+
+**Data Manipulation**
+
+```{r}
+ds <- tsc$date
+y <- tsc$confirmed  
+
+df <- data.frame(ds, y)
+
+```
+
+```{r}
+# prophet model & forecast
+
+m <- prophet(df)
+future <- make_future_dataframe(m, periods = 365)   # make predictions of next 28 days
+fc <- predict(m, future)
+
+# plot
+
+plot(m, fc) + labs(title = "Covid19 forecast - US")
+
+```
+
+```{r}
+dyplot.prophet(m, fc)
+```
+
+```{r, fig.height=6, fig.width=5}
+prophet_plot_components(m, fc)
+```
+
+```{r}
+#pred <- fc$yhat[1:934]    # 934 bcoz original data has 121 roles (exclude forecasts)
+#actual <- m$history$y
+
+#plot(pred, actual)
+#abline(lm(pred~actual), col = "blue")
+
+```
+
+```{r}
+#summary(lm(pred~actual))
+```
+
+It explains near perfect relationships, and P-value of 0.05 indicates statistical significant.
+
+## 8 Bike Rental Forecast with Regressors
+
+<https://www.youtube.com/watch?v=sA0OqK6Mwc4&list=PL34t5iLfZddt9X6Q6aq0H38gn-_JQ1RjS&index=8>
+
+I will use Bike rental data available from Kaggle. We will start by simple time-series model that capture trends and seasonality.
+
+Then we will add aggressors such as US holidays because Bike rental is usually affected by that, and also temperature and humidity.
+
+The data is called "Bike Sharing in Washington D.C. Dataset" in Kaggle. Link: <https://www.kaggle.com/datasets/marklvl/bike-sharing-dataset>
+
+Forecasting of rental bike is very useful for planning purposes.
+
+### 8.1 Data & plot
+
+```{r}
+bike <- read.csv("bike.csv", header = T)
+
+bike
+```
+
+We will use date column and "cnt". cnt is the number of bike rented.
+
+```{r}
+bike <- bike %>% mutate(dteday = ymd(dteday))
+
+```
+
+Following plot shows that:
+
+-   We have complete two years of data.\
+-   The data has seasonality and trend.
+    -   During winters, bike rental is low
+    -   During summers, bike rental is higher significantly
+
+```{r}
+
+qplot(x = dteday, y = cnt, data = bike) + 
+  labs(title = "Bike Rentals in Washington DC")
+
+```
+
+First we develop forecast based on date and bike-rental, then we add information of holidays in US because bike-rental might be affected. Later on, we add regressors such as temperature and humidity and see whether it will improve our bike rental forecasting model.
+
+### 8.2 Model and Its performance
+
+```{r}
+ds <- bike$dteday
+y <- bike$cnt
+
+df.bike <- data.frame(ds, y)
+
+# Prophet model
+
+m.bike <- prophet(df = df.bike)
+
+# forecast
+
+future <- make_future_dataframe(m.bike, periods = 365)  # predict next 365 days
+fc <- predict(m.bike, future)
+  
+```
+
+
+
+Plot forecast
+
+```{r}
+plot(m.bike, fc)
+```
+```{r}
+dyplot.prophet(m.bike, fc)
+
+```
+It looks like a decent model because most of the data point fall within the confidence interval, and the model seems to capture the trends and seasonality nicely. 
+
+```{r, fig.width=6, fig.height=5}
+prophet_plot_components(m.bike, fc)
+```
+**Model performance**
+
+```{r}
+pred <- fc$yhat[1:731]   # original df "df.bike" has 731 rows data
+actual <- df.bike$y
+
+plot(actual, pred)
+abline(lm(pred~actual), col = "green4")
+```
+```{r}
+summary(lm(pred~actual))
+```
+R2 is about 74.57%. It is a descent model but we can see a lot of scatter above the green line. If we can reduce these scatters, that can improve this R2 and improve the model. We can improve the model by include more input information.  
+
+### 8.3 Adding Regressors
+
+* Adding holidays  
+* Adding temperature  
+* Adding humidity  
+
+```{r}
+m <- prophet()
+m <- add_country_holidays(m, country_name = "US")   # Set "AU" for Australia
+m <- fit.prophet(m, df.bike)    # It was prophet(), now with regresser, use fit.prophet()
+
+
+```
+Check holidays in US:
+
+```{r}
+m$train.holiday.names
+```
+
+```{r}
+# forecast
+
+future <- make_future_dataframe(m, periods = 365)  # predict next 365 days
+fc <- predict(m, future)
+
+# plot
+
+plot(m, fc)
+
+```
+There are a bit differences, in near 2012, the trend was not so steep. These slight changes are due to **US holidays**.
+
+```{r, fig.width=6, fig.height=7}
+prophet_plot_components(m, fc)
+
+```
+Now, we can see holiday and visual which holiday leads to increase in bike rental. 
+
+**Model Performancec**
+
+```{r}
+pred <- fc$yhat[1:731]   # original df "df.bike" has 731 rows data
+actual <- df.bike$y
+
+plot(actual, pred)
+abline(lm(pred~actual), col = "green4")
+
+```
+```{r}
+summary(lm(pred~actual))
+
+```
+It was 74.5%, now 75.6%. Slight improvement!
+
+**Add temperature**
+
+We will use the original "temp" in the bike. 
+
+```{r}
+df.bike$temp <- bike$temp
+
+head(df.bike, 10)
+
+```
+
+The temperature is less than 1, the original data is normalised. 
+
+```{r}
+m <- prophet()
+m <- add_country_holidays(m, country_name = "US")
+m <- add_regressor(m, 'temp')
+m <- fit.prophet(m, df.bike)
+
+
+```
+TOO MANUAL. Learn it if needed by the job. 
+
+https://www.youtube.com/watch?v=ZMQsetf8Qiw 
+

@@ -1,0 +1,567 @@
+---
+title: "superstore"
+author: "Kar"
+date: "2022-08-11"
+output: html_document
+---
+
+## 1 R PACKAGES 
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(fpp2)
+
+```
+
+## 2 INTRODUCTION
+
+```{r}
+
+```
+
+## 3 DATA IMPORT
+
+```{r}
+
+data <- read.csv("train.csv")
+data
+
+```
+## 4 DATA EXPLORATION AND CLEANING
+
+### 4.1 NA Check 
+
+There is no missing values in the data set, 
+
+```{r}
+colSums(is.na(data))
+
+```
+
+
+### 4.2 Data Structure check
+
+There are 9800 rows of data and 18 columns of variables:
+
+```{r}
+str(data)
+
+```
+
+All variables are character data other than Row.Id, Postal.Code and sales.
+
+### 4.3 Date Manipulation
+
+* However, order.Date and Ship.Date needs to be converted to date.   
+* Create date.var which is the difference between order.date and ship.date.  
+
+```{r}
+data <- data %>% 
+  mutate(Order.Date = dmy(Order.Date),
+         Ship.Date = dmy(Ship.Date),
+         date.var =  as.numeric(Ship.Date - Order.Date)) %>% 
+  relocate(date.var, .after = Ship.Date)
+
+```
+
+Most of the time, goods are shipped after 3 to 5 days of order. 
+
+```{r}
+hist(data$date.var)
+
+```
+
+Extract year and month of ship date for forecast. 
+
+```{r}
+data <- data %>% 
+  mutate(Year = year(Ship.Date), 
+         Month = month(Ship.Date, label = T)) %>% 
+  relocate(Year, .after = date.var) %>% 
+  relocate(Month, .before = Ship.Mode)
+
+head(data, 10)
+
+```
+
+### 4.4 Factor conversion
+
+Following variables are converted into factor because of their categorical nature:
+
+* Year    
+* Month  
+* Ship.Mode   
+* Customer.Name    
+* Segment   
+* Country   
+* City   
+* State   
+* Region    
+* Category   
+* Sub.Category    
+* Product.Name   
+
+```{r}
+data <- data %>% 
+  mutate(Year = factor(Year),
+         Month = factor(Month),
+         Ship.Mode = factor(Ship.Mode),
+         Customer.Name = factor(Customer.Name),
+         Segment = factor(Segment),
+         Country = factor(Country),
+         City = factor(City),
+         State = factor(State),
+         Region = factor(Region),
+         Category = factor(Category),
+         Sub.Category = factor(Sub.Category),
+         Product.Name = factor(Product.Name)
+         )
+  
+```
+
+Summary:
+
+```{r}
+
+data %>% select_if(is.factor) %>% summary()
+
+```
+
+**Customer Name**: There are 793 customer names in the dataset and therefore this variable is not very useful for analysis, unless its inclusion is requested for deeper mining. 
+
+```{r}
+length(levels(data$Customer.Name))
+
+```
+**City**: There are 529 cities in the data and therefore this variable is also not very useful analysis, unless its inclusion is requested for deeper mining. 
+
+```{r}
+length(levels(data$City))
+
+```
+**State**: There are 49 states. 
+
+```{r}
+levels(data$State)
+
+```
+
+**Sub.Category**: There are 17 Sub.category.
+
+```{r}
+levels(data$Sub.Category)
+
+```
+
+
+**Product.Name**: There are 1849 product names and therefore this column is not very useful for analysis, unless its inclusion is requested for deeper mining. 
+
+```{r}
+length(levels(data$Product.Name))
+
+```
+First 20 rows of the product name column. 
+
+```{r}
+head(levels(data$Product.Name), 20)
+
+```
+
+### 4.5 ID Variables removal
+
+This section removes ID variables that may not be useful for the analysis of this project.
+
+```{r}
+glimpse(data)
+
+```
+
+
+```{r}
+data <- data %>% 
+  dplyr::select(-Row.ID, -Order.ID, -Customer.ID)
+
+
+```
+
+Saving cleaned data set:
+
+```{r}
+#write.csv(data, "superstore2.csv")
+
+```
+
+## 5 VISUALISATION
+
+This project will:
+
+* Focus on the sales of 3 product category - "furniture", "Office Supplies", and "Technology".    
+* Focus on overall trends and seasonality.     
+
+### 5.1 Daily trends
+
+Let's see the daily trends of 3 categories. 
+
+Set up data frame:
+
+```{r, message=FALSE}
+# Data
+data.daily <- data %>% 
+  dplyr::select(Order.Date, Category, Sales) %>% 
+  arrange(Order.Date) %>% 
+  group_by(Order.Date, Category) %>% 
+  summarise(daily.total.sales = sum(Sales)) %>% 
+  ungroup()
+
+head(data.daily, 10)
+
+```
+
+Plot: 
+
+```{r}
+# Plot
+
+ggplot(data.daily, aes(x = Order.Date, y = log(daily.total.sales), color = Category)) +
+  geom_point(alpha = 0.5) +
+  geom_line() +
+  facet_wrap(~Category, ncol = 1, scales = "free_y") +
+  theme(legend.position = "none") +
+  labs(title = "Daily Sales")
+
+```
+
+### 5.2 Monthly-total trends 
+
+Let's create a monthly total sales data frame 
+
+```{r, message=FALSE}
+
+data.monthly <- data.daily %>% 
+  mutate(Year.Month = paste0(year(Order.Date), "-", month(Order.Date)),
+         Year.Month = ym(Year.Month)) %>% 
+  group_by(Year.Month, Category) %>% 
+  summarise(monthly.total.sales = sum(daily.total.sales))
+
+head(data.monthly, 10)
+
+```
+
+```{r}
+# Plot
+ggplot(data.monthly, aes(x = Year.Month, y = monthly.total.sales, color = Category)) +
+  geom_point(alpha = 0.5) +
+  geom_line() +
+  facet_wrap(~Category, ncol = 1, scales = "free_y") +
+  theme(legend.position = "none") +
+  labs(title = "Montly-Total Sales")
+
+```
+
+
+
+## 6 FORECAST 
+
+Setting up data frame: In this data frame I am defining the sales as **daily average sales of each month**. For example, in 2015 July, there were 20 opening days and average daily sales was $600. 
+
+```{r, message=FALSE}
+mydata <- data.daily %>% 
+  ungroup() %>% 
+  mutate(Year.Month = paste0(year(Order.Date), "-", month(Order.Date)),
+         Year.Month = ym(Year.Month)) %>% 
+  select(Category, Year.Month, daily.total.sales) %>% 
+  arrange(Category) %>% 
+  group_by(Category, Year.Month) %>% 
+  summarise(daily.avg.sales = round(mean(daily.total.sales), 2)) %>% 
+  ungroup()  
+
+```
+
+Randomly select 2 samples from each category:
+
+```{r}
+set.seed(123)
+
+sample_n(mydata, 2)
+
+```
+
+
+### 6.1 Furniture 
+
+Average sales of furniture per day in each month of each year: 
+
+```{r}
+# time series convert
+
+furni <- mydata %>% filter(Category == "Furniture")
+furni.ts <- ts(furni[,3], start = c(2015,1), frequency = 12)
+  
+# time plot
+
+autoplot(furni.ts) + 
+  labs(title = "Time Plot: Furniture Average Sales per Day",
+       ylab = "Sales") +
+  theme_classic() +
+  geom_vline(aes(xintercept = 2016), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2017), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2018), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2019), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2015), color = "grey", linetype = 2)
+  
+```
+* In the overall **Trend Component**: There is no obvious positive and negative trends over time.
+
+* In the **Seasonal Component**: There might be a seasonal pattern. There is a regular pattern happening the same month every year end. 
+
+
+```{r}
+# difference plot
+furni.ts.d <- diff(furni.ts)
+autoplot(furni.ts.d) + 
+  labs(title = "Time Plot: Change in Furniture Average Sales per Day",
+       ylab = "Sales") +
+  geom_point()
+
+```
+Year-overlapped Seasonal plot: 
+
+```{r}
+ggseasonplot(furni.ts.d) +
+  labs(title = "Seasonal Plot: Change in Daily Furniture Sales",
+       y = "Sales")
+
+```
+
+Plot suggest a regular seasonality: 
+
+* The change from December to January looks like always a drop, the drop may be different in different years but the data has a very large drop between December to January.
+
+* There is a also a large drops from September to October. The data growing together from October to September, drop together when comes to October but all data growing together again when comes to November. 
+
+
+```{r}
+ggsubseriesplot(furni.ts.d) +
+  labs(title = "Sub-series time plot: Change in Daily Furniture Sales from 2015 to 2018",
+       subtitle = "Bluelines: Averages \n ",
+       y = "Sales") +
+  geom_point() 
+
+```
+**Insights**
+
+* The average change in January is highly negative      
+* The average change in September is highly positive  
+* The average change in October is highly negative    
+* The average change in November is highly positive    
+* The mean of the data in different month is very different    
+
+Therefore, the big negative value is often associated with January and October. It is regular patterns happening every year during the same month. It will affect the type of model used for forecast.
+
+
+
+```{r}
+decomp.furni <- decompose(furni.ts)
+
+plot(decomp.furni)
+
+```
+
+
+#### 6.1.1 Seasonal naive method**
+
+Using seasonal native method as our benchmark.   
+* It says that y_t = y_{t-s} + e_t [it means random error]  
+* For example, the value in February 2015 will be equal to the value in February 2016.   
+* It is the great method to use when there is strong seasonality.    
+* Use the first-different data to make the forecast. 
+
+Fitting the seasonal naive model: 
+
+```{r}
+fit_furni_naive <- snaive(furni.ts.d)
+summary(fit_furni_naive)
+
+```
+* The residual standard deviation (sd) is 303.57. It is used to measure how will the data fitting, number closer to zero is better. 
+
+* The residual sd is the benchmark. This simple model says that the value of the current month is the same as the value of the current month 1 year ago. This model fit the data by having a missing on average by roughly 303k dollars. Whether it is a lot depends on the task and data.
+
+Checking how well the model is fitting the data. 
+
+```{r}
+checkresiduals(fit_furni_naive)
+
+```
+There is one lag in the ACF plot has autocorrelation value higher than the significant boundary, however it is fine. Because based on a Ljung-Box test below with p-value of 0.26 indicates that there is insufficient evidence of non-zero autocorrelation. The lag that exceed significant boundary might be because of chance, and in reality there is little evidence of non-zero autocorrelation.  
+
+```{r}
+Box.test(fit_furni_naive$residuals, 
+         lag = 20,       # 20 is more than enough
+         type = "Ljung-Box" )
+```
+
+
+
+#### 6.1.2 ETS Model
+
+Fitting the ets (Exponential Smoothing model) and the result shows that:
+
+```{r}
+fit_furni_ets <- ets(furni.ts)
+summary(fit_furni_ets)
+
+```
+The best model is ETS(A, N, A), this ETS taxonomy indicates the type of Error, Trend, and Seasonality. ETS(A, N, A) means that:
+
+* The error is *Additive*      
+* There is *No* trend    
+* The seasonality is *Additive*, which means there is seasonality       
+
+The **Sigma** is the same thing as Residual standard deviation of seasonal naive model. Smaller number of sigma indicates a good fit. Therefore, comparing both model:
+
+* 1. Seasonal naive model's residual sd: 303.5729  
+* 2. ETS model's Sigma: 164.3883  
+
+ETS is fitting the data better than seasonal naive model. 
+
+```{r}
+checkresiduals(fit_furni_ets)
+
+```
+There is a bit of improve in the ACF plot. 
+
+#### 6.1.3 ARIMA Model
+
+Fitting ARIMA model. 
+
+```{r}
+fit_furni_arima <- auto.arima(furni.ts, 
+                              d = 1, 
+                              D = 1, 
+                              stepwise = F, 
+                              approximation = F, 
+                              trace = T)
+  
+```
+Print out the ARIMA model, it is the most sophisticated model in this project, hope this model can do a better job and get rid of the autocorrelation. 
+
+```{r}
+summary(fit_furni_arima)
+
+```
+sigma^2 is 46404 and therefore sigma is :
+
+```{r}
+sqrt(46404)
+
+```
+Checking residual plots: 
+
+```{r}
+checkresiduals(fit_furni_arima)
+
+```
+
+#### 6.1.4 Forecast with ETS Model
+
+Residuals and ACF plots of seasonal naive model, ETS model and ARIMA model seem to fitting the data well. Comparing the result of residual standard deviation and sigma of these models:
+
+* Seasonal naive model - residual standard deviation: 303.57     
+* ETS model - sigma: 164.39  
+* ARIMA model - sigma^2 = 46404, and sigma = 215.42  
+
+ETS model is the best fit and therefore will be used for forecast of furniture average sales per day in this section. I will be forecasting 
+
+```{r}
+furni_ets_fc <-  forecast(fit_furni_ets, h = 24)  
+
+autoplot(furni_ets_fc)
+
+```
+Visual inspection finds that the output is making sense. It captures seasonal pattern from historical data. The data seems to stationary and there is no a positive or negative trend. It matches the trend pattern in the historical data. 
+
+Following is the forecast value of the next 24 months. 
+
+```{r}
+furni_ets_fc
+```
+
+### 6.2 Office Supplies Forecast
+
+Average sales of office supplies per day in each month of each year: 
+
+```{r}
+
+# time series convert
+
+office <- mydata %>% filter(Category == "Office Supplies")
+office.ts <- ts(data = office[, 3], start = c(2015, 1), frequency = 12)
+
+# time plot
+
+autoplot(office.ts) + 
+  labs(title = "Time Plot: Office Supplies Average Sales per Day",
+       y = "Sales") +
+  theme_classic() +
+  geom_vline(aes(xintercept = 2016), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2017), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2018), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2019), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2015), color = "grey", linetype = 2)
+
+```
+
+```{r}
+office.ts.t <- diff(office.ts)
+autoplot(office.ts.t) + 
+  labs(title = "Time Plot: Change in Office Supplies Average Sales per Day",
+       y = "Sales")
+
+```
+
+
+
+
+
+### Technology Forecast
+
+```{r}
+# time series convert
+
+tech <- mydata %>% filter(Category == "Technology")
+tech.ts <- ts(tech[, 3], start = c(2015, 1), frequency = 12)
+
+# time plot
+
+autoplot(tech.ts) + 
+  labs(title = "Time Plot: Technology Average Sales per Day",
+       y = "Sales")
+
+```
+
+```{r}
+# First difference data
+
+tech.ts.d <- diff(tech.ts)
+
+autoplot(tech.ts.d) + 
+  labs(title = "Time Plot: Change in Technology Average Sales per Day",
+       y = "Sales")
+
+```
+Now I have the change from month to month. 
+
+
+
+
+
+## REFERENCE
+
+https://www.kaggle.com/datasets/rohitsahoo/sales-forecasting 
+
+https://www.openforecast.org/adam/index.html
+
+https://www.r-bloggers.com/2020/10/how-to-visualize-time-series-data-tidy-forecasting-in-r/
