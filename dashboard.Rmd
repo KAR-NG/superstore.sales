@@ -23,7 +23,14 @@ library(rpivotTable)
 library(plotly)
 library(openintro)
 library(highcharter)
-
+library(kableExtra)
+library(gt)
+library(scales)
+library(lubridate)
+library(leaflet)
+library(maps)
+library(tigris)   
+library(htmltools)
 
 # Data import
 ss <- read.csv("superstore2.csv", header = T)
@@ -35,7 +42,7 @@ ss <- ss %>%
          Year = factor(Year),
          Month = factor(Month),
          Ship.Mode = factor(Ship.Mode),
-         Customer.Name =! factor(Customer.Name),
+         Customer.Name = factor(Customer.Name),
          Segment = factor(Segment),
          Country = factor(Country),
          City = factor(City),
@@ -46,8 +53,11 @@ ss <- ss %>%
          Product.Name = factor(Product.Name)
          ) %>%    # These are datas and factor conversion          
   select(-X, -Ship.Date, -Product.ID, -Postal.Code, -Country, -Region, -Year, -Month, -date.var) %>%    # Removing some unnecessary variables to simplify the df
-  select(State, City, Order.Date, Ship.Mode, Customer.Name, Segment, Category, Sub.Category, Product.Name, Sales) # Rearranging all variables
- 
+  select(State, City, Order.Date, Ship.Mode, Customer.Name, Segment, Category, Sub.Category, Product.Name, Sales) %>% 
+  mutate(Year = factor(year(Order.Date))) %>% 
+  relocate(Year, .before = Order.Date)
+
+
 # Preparing some additional tables  
 # Furniture df
 furni <- ss %>% filter(Category == "Furniture")
@@ -58,19 +68,24 @@ office <- ss %>% filter(Category == "Office Supplies")
 # Technology df
 tech <- ss %>% filter(Category == "Technology")
 
-```
 
+# Reference
+# https://simplemaps.com/data/us-cities
+
+
+```
 
 Executive Summary {data-icon="fa-users"}
 =====================================================================================
 
-R1
+C1 {data-width=150}
 ----------------------------------------------------------
+
 
 ### Last Update
 
 ```{r}
-valueBox(Sys.time(),
+valueBox(Sys.Date(),
          icon = "glyphicon-time", color = "lightgrey")
 ```
 
@@ -82,7 +97,6 @@ valueBox(Sys.time(),
 valueBox(paste0("$", prettyNum(sum(ss$Sales), big.mark = ",")),
          icon = "fa-dollar-sign")
  
-
 ```
 
 ### Total Orders
@@ -104,14 +118,10 @@ a <- ss %>%
 ave.sales <- round(a$total.sales/a$count)
 
 valueBox(paste0("$", ave.sales), 
-         icon = "fab fa-circle-dollar")
+         icon = "fa-money")
 
 ```
 
-
-
-R1
-----------------------
 
 ### Product Type
 
@@ -125,13 +135,188 @@ networkData <- ss %>%
   summarise(count = n()) 
 
 simpleNetwork(networkData, zoom = T, 
-              linkDistance = 80,
+              linkDistance = 60,
               fontSize = 15,
               opacity = 0.8,
-              width = 500
+              width = 20
               )
 
 ```
+
+
+
+C1 {data-width=500}
+----------------------
+
+### Map
+
+```{r, message=FALSE, warning=FALSE}
+us <- read.csv("uscities.csv")   # download a US dataset from https://simplemaps.com/data/us-cities
+
+cities <- us %>%                 # Cleaning the dataset
+  select(state_name, city, lat, lng) %>% 
+  rename("City" = "city",
+         "State" = "state_name")
+
+# Set data frame
+
+city.sales <- ss %>% 
+  group_by(State, City) %>% 
+  summarise(Total.Sales = sum(Sales)) %>% 
+  left_join(cities, by = c("State", "City")) %>% 
+  mutate(Total.Sales = round(Total.Sales, 2),
+         Total.Sales.lab = paste0("$", Total.Sales),
+         label = paste0("<strong>State:</strong> ", State, "<br>", 
+                        "<strong>City:</strong> ", City, "<br>", 
+                        "Total Sales:", "$", prettyNum(Total.Sales, big.mark = ",")))
+
+# Add a new variable for color grouping
+
+city.sales$sales.group <- cut(city.sales$Total.Sales,
+                              breaks = c(0, 100, 500, 1000, 5000, 300000),
+                              labels = c("$0 - $100",
+                                         "$100 - $500",
+                                         "$500 - $1000",
+                                         "$1000 - $5000",
+                                         "$5000 - $300000"))
+
+city.sales.palette <- colorFactor(palette = c("yellow", "green", "orange", "red", "black"),
+                              domain = city.sales$sales.group)
+
+
+# Download US State file for choropleth from tigris package 
+states <- states(cb = T)   
+
+states.sales <- ss %>% 
+  group_by(State) %>% 
+  summarise(Total.Sales = sum(Sales)) %>% 
+  mutate(Total.Sales = round(Total.Sales, 2),
+         Total.Sales.lab = paste0("$", Total.Sales),
+         label = paste0("State: ", State, "<br>", 
+                        "Total Sales:", "$", prettyNum(Total.Sales, big.mark = ",")))
+
+bins <- c(0, 1000, 10000, 50000, Inf)
+states.palette <- colorBin("YlOrRd", domain = states.sales$Total.Sales, bins = bins)
+
+```
+
+```{r}
+# Mapping with leaflet
+
+leaflet(data = city.sales) %>% 
+  addTiles() %>% 
+  addProviderTiles(providers$Esri.WorldImagery, group = "Esri World Imagery") %>% 
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>% 
+  setView(lat = 37.09, lng = -95.71, zoom = 4) %>% 
+  addLayersControl(baseGroups = c("Open Street Map",
+                                  "Esri World Imagery",
+                                  "Stamen Toner Lite"),
+                   overlayGroups = c("Cluster Point",
+                                     "Point",
+                                     "Choropleth"),
+                   options = layersControlOptions(collapsed = F)) %>%
+  hideGroup(c("Cluster Point", "Choropleth")) %>% 
+  addMarkers(group = "Cluster Point",
+             clusterOptions = markerClusterOptions(),
+             label = ~Total.Sales.lab,
+             popup = ~label) %>%  
+  addCircleMarkers(group = "Point",
+                   opacity = 1,
+                   weight = 2,
+                   color = "black",
+                   fillColor = ~city.sales.palette(sales.group),
+                   radius = ~log(Total.Sales),
+                   label = ~Total.Sales.lab,
+                   popup = ~label) %>% 
+  addPolygons(group = "Choropleth",
+              data = states,
+              fillColor = ~states.palette(states.sales$Total.Sales),
+              weight = 2, 
+              opacity = 1,
+              color = "white",
+              dashArray = "2",
+              fillOpacity = 0.7,
+              #
+              highlightOptions = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "3",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              #
+              label = lapply(states.sales$label, HTML),
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "15px",
+                direction = "auto")) %>% 
+  addLegend(data = states.sales, 
+            pal = states.palette, values = ~states.sales$Total.Sales, 
+            opacity = 0.7, title = "Choropleth Legend",
+            position = "bottomright"
+            ) 
+
+
+```
+
+
+
+
+```{r}
+
+##
+states <- states(cb = T)   
+
+states.sales <- ss %>% 
+  group_by(State) %>% 
+  summarise(Total.Sales = sum(Sales)) %>% 
+  mutate(Total.Sales = round(Total.Sales, 2),
+         Total.Sales.lab = paste0("$", Total.Sales),
+         label = paste0("State: ", State, "<br>", 
+                        "Total Sales:", "$", prettyNum(Total.Sales, big.mark = ",")))
+
+bins <- c(0, 1000, 10000, 50000, Inf)
+states.palette <- colorBin("YlOrRd", domain = states.sales$Total.Sales, bins = bins)
+
+states.sales
+
+```
+```{r}
+states$NAME
+
+```
+
+
+
+```{r}
+##
+
+leaflet(data = city.sales) %>% 
+  addTiles() %>% 
+  addProviderTiles(providers$Esri.WorldImagery, group = "Esri World Imagery") %>% 
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>% 
+  setView(lat = 37.09, lng = -95.71, zoom = 4) %>% 
+  addPolygons(group = "Choropleth",
+              data = states,
+              fillColor = ~states.palette(states.sales$Total.Sales),
+              #
+              label = lapply(states.sales$label, HTML),
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "15px",
+                direction = "auto"))
+
+```
+
+
+```{r}
+city.sales %>% filter(State == "Louisiana")
+
+```
+
+
+
+C1 {data-width=250}
+-----------------------------
 
 ### Product Sales
 
@@ -147,15 +332,15 @@ bubble.data <- ss %>%
 hc <- hchart(object = bubble.data, "packedbubble",
        hcaes(name = "Sub.Category", value = "total.sales", group = "Category"))
 
-q60 <- as.numeric(quantile(bubble.data$total.sales, .60))   # Only catgeory >0.95 will be appear
+q60 <- as.numeric(quantile(bubble.data$total.sales, .60))   # Only catgeory >0.95 will be appear  
 
 hc %>% 
   hc_tooltip(
     useHTML = TRUE,
     pointFormat = "<b>{point.name}:</b> {point.value}"
-  ) %>% 
-  hc_plotOptions(
-    packedbubble = list(
+  ) %>%     
+  hc_plotOptions(   
+    packedbubble = list(     
       maxSize = "50%",
       zMin = 0,
       layoutAlgorithm = list(
@@ -176,16 +361,13 @@ hc %>%
         style = list(
           color = "black",
           textOutline = "none",
-          fontWeight = "normal"
+          fontWeight = "normal", zoomable = T
         )
       )
     )
   )
+
 ```
-
-
-R1  
------------------------------
 
 ### Best Sellers
 
@@ -207,6 +389,100 @@ collapsibleTreeSummary(tree.data,
                 fontSize = 15, 
                 nodeSize = "total.Sales")  
 
+
+```
+
+
+
+C1 {.tabset .tabset.fade}
+---------------------------------
+
+### Top 20 Customers
+
+```{r}
+# Data Frame
+
+best.cus <- ss %>% 
+  group_by(Customer.Name) %>% 
+  summarise(total.sales = round(sum(Sales))) %>% 
+  arrange(-total.sales) 
+
+# Plot
+
+a <- best.cus[c(1:20), ] %>% 
+  arrange(total.sales) %>% 
+  mutate(Customer.Name = factor(Customer.Name, levels = Customer.Name)) %>% 
+  ggplot(aes(x = total.sales, y = Customer.Name)) +
+  geom_col(aes(fill = -total.sales)) +
+  labs(x = "Total Sales, $") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) +
+  scale_x_continuous(labels = function(x)paste0({x/100}, "k"))
+
+a %>% ggplotly(tooltip = c("x", "y"))
+
+```
+
+
+### Top 20 Products
+
+```{r}
+# Data Frame
+best.cus <- ss %>% 
+  group_by(Product.Name) %>% 
+  summarise(total.sales = round(sum(Sales))) %>% 
+  arrange(-total.sales) 
+
+# plot 
+a <- best.cus[c(1:20), ] %>% 
+  arrange(total.sales) %>%
+  mutate(Product.Name = factor(Product.Name, levels = Product.Name)) %>% 
+  ggplot(aes(x = total.sales, y = Product.Name)) +
+  geom_bar(stat = "identity", aes(fill = -total.sales)) +
+  labs(x = "Total Sales, $") +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) +
+  scale_x_continuous(labels = function(x)paste0({x/100}, "k"))
+
+a %>% ggplotly(tooltip = c("x"))
+
+```
+
+### Customers Table
+
+```{r}
+
+ss %>% 
+  group_by(Customer.Name) %>% 
+  summarise(total.sales = round(sum(Sales))) %>% 
+  arrange(-total.sales) %>% 
+  datatable(filter = "top", 
+            extensions = "Buttons",
+            option = list(dom = "Bfrtip",
+                          buttons = c("copy", "excel", "csv", "pdf", "print"),
+                          pageLength = 20),
+            colnames = c("Customer Name" = "Customer.Name",
+                         "Total Sales, $" = "total.sales"))
+
+```
+
+### Product Table
+
+```{r}
+
+ss %>% 
+  group_by(Product.Name) %>% 
+  summarise(total.sales = round(sum(Sales))) %>% 
+  arrange(-total.sales) %>% 
+    datatable(filter = "top", 
+            extensions = "Buttons",
+            option = list(dom = "Bfrtip",
+                          buttons = c("copy", "excel", "csv", "pdf", "print"),
+                          pageLength = 20),
+            colnames = c("Product Name" = "Product.Name",
+                         "Total Sales, $" = "total.sales"))
 
 ```
 
@@ -367,9 +643,11 @@ ggplotly(g6)
 ```
 
 
-Furniture Forecast {data-orientation=columns}{data-navmenu="Menu A"}
+Furniture Forecast {data-navmenu="Menu A"}
 ==========================================================================
 
+R1 {data-width=650}
+-------------------
 
 ### ETS Forecast of Next 24 Months
 
@@ -383,6 +661,9 @@ hchart(furni_ets_fc)
 
 
 ```
+
+R2 {data-width=350}
+---------------------------------------------
 
 ### Model Summary
 
@@ -478,7 +759,16 @@ datatable(ss,
           caption = "Raw Sales Data",
           rownames = T,
           filter = "top",
-          option = list(pageLength = 25))
+          extensions = "Buttons",
+          option = list(pageLength = 25,
+                        dom = "Bfrtip",
+                        buttons = c("copy", "csv", "pdf", "excel", "print")),
+          colnames = c("Order Date" = "Order.Date",
+                       "Ship Mode" = "Ship.Mode",
+                       "Customer Name" = "Customer.Name",
+                       "Sub-category" = "Sub.Category",
+                       "Product Name" = "Product.Name"
+                       ))
 
 ```
 
@@ -501,5 +791,9 @@ rpivotTable(furni2,
             cols = "Order.Date",
             rows = "State")
 ```
+
+
+
+
 
 

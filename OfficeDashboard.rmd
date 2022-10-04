@@ -1,0 +1,163 @@
+---
+title: "Untitled"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(fpp2)
+library(knitr)
+library(DT)
+library(rpivotTable)
+library(plotly)
+library(openintro)
+library(highcharter)
+library(kableExtra)
+library(gt)
+library(scales)
+library(lubridate)
+library(leaflet)
+library(maps)
+library(tigris)   
+library(htmltools)
+
+# Data import
+ss <- read.csv("superstore2.csv", header = T)
+
+# Data manipulation
+ss <- ss %>% 
+  mutate(Order.Date = ymd(Order.Date),
+         Ship.Date = ymd(Ship.Date),
+         Year = factor(Year),
+         Month = factor(Month),
+         Ship.Mode = factor(Ship.Mode),
+         Customer.Name = factor(Customer.Name),
+         Segment = factor(Segment),
+         Country = factor(Country),
+         City = factor(City),
+         State = factor(State),
+         Region = factor(Region),
+         Category = factor(Category),
+         Sub.Category = factor(Sub.Category),
+         Product.Name = factor(Product.Name)
+         ) %>%    # These are datas and factor conversion          
+  select(-X, -Ship.Date, -Product.ID, -Postal.Code, -Country, -Region, -Year, -Month, -date.var) %>%    # Removing some unnecessary variables to simplify the df
+  select(State, City, Order.Date, Ship.Mode, Customer.Name, Segment, Category, Sub.Category, Product.Name, Sales) %>% 
+  mutate(Year = factor(year(Order.Date))) %>% 
+  relocate(Year, .before = Order.Date)
+
+office <- ss %>% filter(Category == "Office Supplies")
+
+# Monthly total
+
+office <- office %>% select(Order.Date, Sales) %>% 
+  mutate(year.month = paste0(year(Order.Date), "-", month(Order.Date)),
+         mydate = ym(year.month)) %>% 
+  select(-Order.Date, year.month) %>% 
+  group_by(mydate) %>% 
+  summarise(MonthyTotalSales = round(sum(Sales), 2))
+
+
+# furni.ts
+
+office.ts <- ts(office[,2], start = c(2015, 1), frequency = 12)
+office.ts
+```
+
+
+
+
+Monthly Total Sales {data-width=650}
+-----------------------------------------------------------------------
+
+### Overall Plot
+
+```{r}
+a <- autoplot(office.ts) + labs(y = "Sales, $") +
+  geom_point() +
+  theme_classic() +
+  geom_vline(aes(xintercept = 2016), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2017), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2018), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2019), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2015), color = "grey", linetype = 2) +
+  labs(title = "Monthly Total Sales") + 
+  theme(plot.title = element_text(face = "bold")) 
+  
+ggplotly(a) 
+
+
+```
+
+### Forecast with ETS
+
+
+```{r}
+
+fit.office.ets <- ets(office.ts)
+office.fc <- forecast(fit.office.ets, h = 12, level = 95)
+hchart(office.fc)
+```
+
+
+
+
+Seasonality {.tabset}
+-----------------------------------------------------------------------
+
+### Difference Plot
+
+```{r}
+office.ts.d <- diff(office.ts)
+
+b <- autoplot(office.ts.d)+
+  geom_point(color = "purple") +
+  geom_line(color = "purple") +
+  theme_classic() +
+  geom_vline(aes(xintercept = 2016), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2017), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2018), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2019), color = "grey", linetype = 2) +
+  geom_vline(aes(xintercept = 2015), color = "grey", linetype = 2) +
+  labs(title = "Difference Plot") + 
+  theme(plot.title = element_text(face = "bold"))
+
+ggplotly(b)
+
+```
+
+### Seasonal plot
+
+```{r}
+c <- ggseasonplot(office.ts.d) +
+  labs(title = "Seasonal Plot: Change in Montly Total Sales",
+       y = "$") +
+  geom_point() +
+  theme_classic() +
+  theme(legend.position = "top", 
+        plot.title = element_text(face = "bold"))
+  
+ggplotly(c)
+
+```
+
+### Subseries plot
+
+```{r}
+d <- ggsubseriesplot(office.ts.d) +
+  labs(title = "SubSeries Plot",
+       y = "$") +
+  geom_point() +
+  theme_classic() +
+  theme(legend.position = "top", 
+        plot.title = element_text(face = "bold"))
+  
+ggplotly(d)
+```
+
